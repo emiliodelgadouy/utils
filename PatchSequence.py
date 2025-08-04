@@ -14,7 +14,6 @@ class PatchSequence(Sequence):
         self.preprocess_fn = preprocess_fn
 
     def __len__(self):
-        print(len(self.df),self.batch_size)
         return len(self.df) // self.batch_size
 
     def on_epoch_end(self):
