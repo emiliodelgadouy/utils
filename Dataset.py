@@ -46,8 +46,9 @@ class Dataset(pd.DataFrame):
     def __init__(self, data=None, lateralize=False, reduced=False, n=100, *args, **kwargs):
         if data is None:
             base = os.path.dirname(os.path.abspath(__file__))
+            print(base)
             data = pd.read_csv(
-                os.path.join(base, "utils.csv"),
+                os.path.join(base, "data.csv"),
                 usecols=[
                     'path', 'laterality', 'view',
                     'breast_birads', 'finding_birads', 'No_Finding',
