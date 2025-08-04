@@ -1,0 +1,6 @@
+/images_original/
+/.ipynb_checkpoints/
+/.venv/
+/.idea/
+/.~lock.data.csv#
+*.xz
