@@ -41,12 +41,12 @@ class Dataset(pd.DataFrame):
         if filename is None:
             filename = 'dump_cache.npz'
         data = np.load(filename, allow_pickle=True)
-        self._cache = data['cache']
+        self._cache = data['cache'].item()
 
     def __init__(self, data=None, lateralize=False, reduced=False, n=100, *args, **kwargs):
         if data is None:
+            self._cache = {}
             base = os.path.dirname(os.path.abspath(__file__))
-            print(base)
             data = pd.read_csv(
                 os.path.join(base, "data.csv"),
                 usecols=[

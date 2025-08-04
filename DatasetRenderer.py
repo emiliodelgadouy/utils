@@ -147,25 +147,15 @@ class DatasetRenderer:
         self._update_display()
 
     def thumb_html(self, path, width, rois=None, draw_bounding_box=True):
-        """
-        Genera un thumbnail usando Dataset.full_image (con o sin bounding-box),
-        lo convierte a base64 y devuelve solo un <img>.
-        """
         try:
-            # 1. Carga la imagen (usa tu lógica de full_image)
             arr = self.df.full_image(path, rois=rois, draw_bounding_box=draw_bounding_box)
-            # 2. A PIL Image
             img_pil = Image.fromarray(arr.astype(np.uint8))
-            # 3. Thumbnail
             img_pil.thumbnail((width, width))
-            # 4. Codificar en base64
             buf = BytesIO()
             img_pil.save(buf, format="PNG")
             b64 = base64.b64encode(buf.getvalue()).decode()
-            # 5. Devolver solo el <img>
             return f'<img src="data:image/png;base64,{b64}" width="{width}" />'
         except Exception as e:
-            # si falla, devolvemos el span y logueamos el error
             print("thumb_html error:", e)
             return f'<span>Error imagen: {e}</span>'
 
@@ -175,10 +165,7 @@ class DatasetRenderer:
             if patch is None:
                 return "<span>Patch inválido</span>"
 
-            # Convertir el patch NumPy a imagen PIL
-            img_pil = Image.fromarray(patch.astype(np.uint8))  # Asegura que está en 0–255
-
-            # Codificar en base64
+            img_pil = Image.fromarray(patch.astype(np.uint8))
             buf = BytesIO()
             img_pil.save(buf, format="PNG")
             b64 = base64.b64encode(buf.getvalue()).decode()
