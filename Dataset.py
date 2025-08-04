@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 
 from utils.StatsRenderer import StatsRenderer
 
+import math
+from multiprocessing import Pool, cpu_count
 
 class Dataset(pd.DataFrame):
     _metadata = ['_cache']
@@ -32,6 +34,32 @@ class Dataset(pd.DataFrame):
     def _constructor(self):
         return Dataset
 
+    def save_dump_parallel(cache: dict,
+                           base_filename: str = 'dump_cache',
+                           num_workers: int = None):
+        """
+        Divide `cache` en num_workers trozos y guarda cada uno en
+        base_filename_0.npz, base_filename_1.npz, …
+        """
+        if num_workers is None:
+            num_workers = cpu_count()
+        items = list(cache.items())
+        chunk_size = math.ceil(len(items) / num_workers)
+        # crear lista de (items_chunk, filename)
+        tasks = []
+        for i in range(num_workers):
+            chunk = items[i * chunk_size:(i + 1) * chunk_size]
+            if not chunk:
+                break
+            fname = f"{base_filename}_{i}.npz"
+            tasks.append((chunk, fname))
+        with Pool(num_workers) as pool:
+            pool.map(self._save_chunk, tasks)
+
+    def _save_chunk(args):
+        items, filename = args
+        # items es lista de tuplas (clave, array)
+        np.savez_compressed(filename, **dict(items))
     def save_dump(self, filename: str = None):
         if filename is None:
             filename = 'dump_cache.npz'
