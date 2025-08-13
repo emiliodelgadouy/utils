@@ -1,34 +1,28 @@
 import os
 import random
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw
 from tqdm import tqdm
-import matplotlib.pyplot as plt
 
 from utils.StatsRenderer import StatsRenderer
 
-import math
-from multiprocessing import Pool, cpu_count
 
 class Dataset(pd.DataFrame):
-    _metadata = ['_cache']
+    _metadata = ['_cache', 'lateralize', '_flip_map']
 
     def preload_cache(self, dtype=np.uint8):
         """
-        Carga todas las imágenes en self._cache como numpy arrays de tipo `dtype`.
-        Ahorrarás memoria usando uint8 (0–255) y convertirás a float justo antes del modelo.
+        Carga todas las imágenes crudas en self._cache como numpy arrays de tipo `dtype`.
+        El flip se hará siempre en _get_image.
         """
-        for path in tqdm(self['path'].unique(), desc="Preloading cache"):
+        for path in tqdm(self['path'], desc="Preloading cache"):
             if path in self._cache:
                 continue
-            try:
-                img = Image.open(path).convert("L")
-                arr = np.array(img, dtype=dtype)
-                self._cache[path] = arr
-            except Exception as e:
-                print(f"Error cargando {path}: {e}")
+            img = Image.open(path).convert("L")
+            self._cache[path] = np.array(img, dtype=dtype)
 
     @property
     def _constructor(self):
@@ -45,31 +39,36 @@ class Dataset(pd.DataFrame):
         data = np.load(filename, allow_pickle=True)
         self._cache = data['cache'].item()
 
-    def __init__(self, data=None, lateralize=False, reduced=False, n=100, *args, **kwargs):
+    def __init__(self, data=None, lateralize=False, reduced=False, dataset_csv = None, n=100, *args, **kwargs):
         if data is None:
             self._cache = {}
-            base = os.path.dirname(os.path.abspath(__file__))
-            data = pd.read_csv(
-                os.path.join(base, "data.csv"),
-                usecols=[
-                    'path', 'laterality', 'view',
-                    'breast_birads', 'finding_birads', 'No_Finding',
-                    'resized_xmin', 'resized_ymin',
-                    'resized_xmax', 'resized_ymax', 'split'
-                ],
-                low_memory=False
-            )
-            data = data.rename(columns={
-                'resized_xmin': 'xmin',
-                'resized_ymin': 'ymin',
-                'resized_xmax': 'xmax',
-                'resized_ymax': 'ymax'
-            })
-            data['findings'] = 1 - data['No_Finding']
-            data = data.drop(columns=['No_Finding'])
-            data['breast_birads'] = data['breast_birads'].apply(Dataset.map_birads).astype("Int64")
-            data['finding_birads'] = data['finding_birads'].apply(Dataset.map_birads).astype("Int64")
-
+            if not dataset_csv:
+                base = os.path.dirname(os.path.abspath(__file__))
+                data = pd.read_csv(
+                    os.path.join(base, "data.csv"),
+                    usecols=[
+                        'path', 'laterality', 'view',
+                        'breast_birads', 'finding_birads', 'No_Finding',
+                        'resized_xmin', 'resized_ymin',
+                        'resized_xmax', 'resized_ymax', 'split'
+                    ],
+                    low_memory=False
+                )
+                data = data.rename(columns={
+                    'resized_xmin': 'xmin',
+                    'resized_ymin': 'ymin',
+                    'resized_xmax': 'xmax',
+                    'resized_ymax': 'ymax'
+                })
+                data['findings'] = 1 - data['No_Finding']
+                data = data.drop(columns=['No_Finding'])
+                data['breast_birads'] = data['breast_birads'].apply(Dataset.map_birads).astype("Int64")
+                data['finding_birads'] = data['finding_birads'].apply(Dataset.map_birads).astype("Int64")
+            else:
+                base = os.path.dirname(os.path.abspath(__file__))
+                data = pd.read_csv(
+                    os.path.join(base, dataset_csv),
+                )
         if reduced:
             data = data.head(n)
 
@@ -82,8 +81,19 @@ class Dataset(pd.DataFrame):
         # normalizar rutas
         self['path'] = self['path'].apply(self._normalize_path)
 
-        if lateralize:
-            self._apply_lateralization()
+        # inicializar flip_map solo si se va a lateralizar
+        self._flip_map = {}
+        self.lateralize = lateralize
+        if self.lateralize:
+            # construye el mapa path → True si laterality=='R'
+            self._flip_map = dict(zip(self['path'], self['laterality'] == 'R'))
+            # ajustar sólo bounding boxes
+            for idx, row in tqdm(self.iterrows(), total=len(self), desc="Flip BBoxes"):
+                if row['laterality'] == 'R':
+                    w = Image.open(row['path']).size[0]
+                    xmin, xmax = row['xmin'], row['xmax']
+                    self.at[idx, 'xmin'] = w - xmax
+                    self.at[idx, 'xmax'] = w - xmin
 
         # cache de PIL Images en memoria
         self._cache = {}
@@ -94,36 +104,18 @@ class Dataset(pd.DataFrame):
             "./utils/images_original"
         ))
 
-    def _apply_lateralization(self):
-        for idx, row in tqdm(self.iterrows(), total=len(self), desc="Lateralización"):
-            if row['laterality'] == 'R':
-                orig = row['path']
-                stem, ext = os.path.splitext(orig)
-                lat_path = f"{stem}_lateralized{ext}"
-                try:
-                    img = Image.open(orig)
-                    w, _ = img.size
-                    flip = img.transpose(Image.FLIP_LEFT_RIGHT)
-                    if not os.path.exists(lat_path):
-                        flip.save(lat_path)
-                    xmin, xmax = row['xmin'], row['xmax']
-                    self.at[idx, 'path'] = lat_path
-                    self.at[idx, 'xmin'] = w - xmax
-                    self.at[idx, 'xmax'] = w - xmin
-                except Exception as e:
-                    print(f"Error lateralizando {orig}: {e}")
-
     def _get_image(self, path, dtype=np.uint8):
+        # carga cruda si no está en cache
         if path not in self._cache:
             img = Image.open(path).convert("L")
-            arr = np.array(img, dtype=dtype)
-            self._cache[path] = arr
-            print("cache miss")
-        else:
-            # print("cache hit")
-            arr = self._cache[path]
-        arr3 = np.stack([arr] * 3, axis=-1)
-        return arr3
+            self._cache[path] = np.array(img, dtype=dtype)
+
+        arr = self._cache[path]
+        # flip horizontal bajo demanda
+        if self.lateralize and self._flip_map.get(path, False):
+            arr = arr[:, ::-1]
+        # devolver en 3 canales
+        return np.stack([arr] * 3, axis=-1)
 
     @staticmethod
     def _draw_bb(img, rois):
@@ -138,6 +130,23 @@ class Dataset(pd.DataFrame):
             width=2
         )
         return Image.alpha_composite(img, overlay)
+
+    def sample_random_patch(self, path, patch_w, patch_h, rois=None, jitter_frac=0.25, draw_bounding_box=True):
+        if draw_bounding_box and rois is not None and not any(pd.isna(rois)):
+            img = self.full_image_with_rois(path, rois)
+        else:
+            img = self.full_image_without_rois(path)
+        h, w, _ = img.shape
+        if patch_w > w or patch_h > h:
+            return None
+        if rois is not None and not any(pd.isna(rois)):
+            x, y = Dataset._patch_centered_jittered_roi(rois, w, h, patch_w, patch_h, jitter_frac)
+        else:
+            x, y = Dataset._patch_fully_random_coords(w, h, patch_w, patch_h)
+        return img[y:y + patch_h, x:x + patch_w, :]
+
+    # ... resto de métodos (_patch_centered_jittered_roi, full_image*, etc.) queda igual ...
+
 
     def sample_random_patch(self, path, patch_w, patch_h, rois=None, jitter_frac=0.25, draw_bounding_box=True):
         if draw_bounding_box and rois is not None and not any(pd.isna(rois)):
@@ -210,6 +219,7 @@ class Dataset(pd.DataFrame):
         )
 
         plt.show()
+
     def full_image_without_rois(self, path):
         img = self._get_image(path).copy()
         return img
@@ -260,7 +270,7 @@ class _RenderAccessor2:
 
     def __call__(self, columns=None, ancho=20, alto=10, order=None, title=None, subtitle=None):
         if columns is None:
-            columns = ['breast_birads', 'laterality', 'view', 'findings']
+            columns = ['breast_birads', 'laterality', 'view', 'findings', 'split']
         statsRenderer = StatsRenderer(self._df)
         statsRenderer.plot_multiple_frequency_distributions(columns, ancho=20, alto=10, order=None, title=None,
                                                             subtitle=None)
