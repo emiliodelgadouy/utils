@@ -66,7 +66,7 @@ class Dataset(pd.DataFrame):
                 data = data.drop(columns=['No_Finding'])
                 data['breast_birads'] = data['breast_birads'].apply(Dataset.map_birads).astype("Int64")
                 data['finding_birads'] = data['finding_birads'].apply(Dataset.map_birads).astype("Int64")
-                data['finding_categories'] = data['finding_categories'].apply(ast.literal_eval)
+                # data['finding_categories'] = data['finding_categories'].apply(ast.literal_eval)
             else:
                 base = os.path.dirname(os.path.abspath(__file__))
                 data = pd.read_csv(
@@ -273,7 +273,7 @@ class _RenderAccessor2:
 
     def __call__(self, columns=None, ancho=20, alto=10, order=None, title=None, subtitle=None):
         if columns is None:
-            columns = ['breast_birads', 'laterality', 'view', 'findings', 'split', 'finding_categories']
+            columns = ['breast_birads', 'laterality', 'view', 'findings', 'split']
         statsRenderer = StatsRenderer(self._df)
         statsRenderer.plot_multiple_frequency_distributions(columns, ancho=20, alto=10, order=None, title=None,
                                                             subtitle=None)
