@@ -12,13 +12,9 @@ from utils.StatsRenderer import StatsRenderer
 
 
 class Dataset(pd.DataFrame):
-    _metadata = ['_cache', 'lateralize', '_flip_map']
+    _metadata = ['_cache', 'lateralize_images', '_flip_map']
 
     def preload_cache(self, dtype=np.uint8):
-        """
-        Carga todas las imágenes crudas en self._cache como numpy arrays de tipo `dtype`.
-        El flip se hará siempre en _get_image.
-        """
         for path in tqdm(self['path'], desc="Preloading cache"):
             if path in self._cache:
                 continue
@@ -40,7 +36,7 @@ class Dataset(pd.DataFrame):
         data = np.load(filename, allow_pickle=True)
         self._cache = data['cache'].item()
 
-    def __init__(self, data=None, lateralize=False, reduced=False, dataset_csv = None, n=100, *args, **kwargs):
+    def __init__(self, data=None, lateralize_images=False, lateralize_bb=False, reduced=False, dataset_csv = None, n=100, *args, **kwargs):
         if data is None:
             self._cache = {}
             if not dataset_csv:
@@ -52,7 +48,7 @@ class Dataset(pd.DataFrame):
                         'breast_birads', 'finding_birads', 'No_Finding',
                         'resized_xmin', 'resized_ymin',
                         'resized_xmax', 'resized_ymax', 'split'
-                        # , 'finding_categories'
+                        , 'finding_categories'
                     ],
                     low_memory=False
                 )
@@ -66,7 +62,7 @@ class Dataset(pd.DataFrame):
                 data = data.drop(columns=['No_Finding'])
                 data['breast_birads'] = data['breast_birads'].apply(Dataset.map_birads).astype("Int64")
                 data['finding_birads'] = data['finding_birads'].apply(Dataset.map_birads).astype("Int64")
-                # data['finding_categories'] = data['finding_categories'].apply(ast.literal_eval)
+                data['finding_categories'] = data['finding_categories'].apply(ast.literal_eval)
             else:
                 base = os.path.dirname(os.path.abspath(__file__))
                 data = pd.read_csv(
@@ -86,19 +82,17 @@ class Dataset(pd.DataFrame):
 
         # inicializar flip_map solo si se va a lateralizar
         self._flip_map = {}
-        self.lateralize = lateralize
-        if self.lateralize:
-            # construye el mapa path → True si laterality=='R'
+        self.lateralize_images = lateralize_images
+        self.lateralize_bb = lateralize_bb
+        if self.lateralize_images:
             self._flip_map = dict(zip(self['path'], self['laterality'] == 'R'))
-            # ajustar sólo bounding boxes
+        if self.lateralize_bb:
             for idx, row in tqdm(self.iterrows(), total=len(self), desc="Flip BBoxes"):
                 if row['laterality'] == 'R':
                     w = Image.open(row['path']).size[0]
                     xmin, xmax = row['xmin'], row['xmax']
                     self.at[idx, 'xmin'] = w - xmax
                     self.at[idx, 'xmax'] = w - xmin
-
-        # cache de PIL Images en memoria
         self._cache = {}
 
     def _normalize_path(self, path):
@@ -115,7 +109,7 @@ class Dataset(pd.DataFrame):
 
         arr = self._cache[path]
         # flip horizontal bajo demanda
-        if self.lateralize and self._flip_map.get(path, False):
+        if self.lateralize_images and self._flip_map.get(path, False):
             arr = arr[:, ::-1]
         # devolver en 3 canales
         return np.stack([arr] * 3, axis=-1)
@@ -273,7 +267,7 @@ class _RenderAccessor2:
 
     def __call__(self, columns=None, ancho=20, alto=10, order=None, title=None, subtitle=None):
         if columns is None:
-            columns = ['breast_birads', 'laterality', 'view', 'findings', 'split']
+            columns = ['breast_birads', 'laterality', 'view', 'findings', 'split', 'finding_categories']
         statsRenderer = StatsRenderer(self._df)
         statsRenderer.plot_multiple_frequency_distributions(columns, ancho=20, alto=10, order=None, title=None,
                                                             subtitle=None)
