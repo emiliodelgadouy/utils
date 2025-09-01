@@ -76,6 +76,7 @@ class StatsRenderer:
         plt.tight_layout()
         plt.show()
 
+
     def plot_multiple_repetition_distributions(
             df,
             columns,
